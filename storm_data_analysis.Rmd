@@ -1,0 +1,313 @@
+---
+title: "Severe Weather Events Analysis"
+output: html_document
+---
+
+# Impact Of Severe Weather Events On Population Health and Economy Across The United States
+
+## Synopsis
+
+In this report, we analyze the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database provides the characteristics of severe weather events,  time and location of occurance and estimated impact to humans, crops and property. The key objective of this analysis is to find out the following:
+
+1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+This research was done with the data from the file (https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) downloaded from Coursera website on May 20, 2015. The findings apply to the period between year 1980 and end in November 2011. Following are the key findings:
+
+### Population Impact
+
+1. TORNADO ranks #1 by causing 2274 fatalities. EXCESSIVE HEAT ranks #2 by causing 1903 fatalities
+2. TORNADO ranks #1 by causing 37971 injuries. TSTM WIND ranks #2 by causing 6957 injuries
+
+### Economic Impact
+
+#### Crop Damage
+
+1. DROUGHT ranks #1 by causing damage worth 13.9725B$ between year 1980 and 2011
+
+2. FLOOD ranks #2 by causing damage worth 5.661B$ between year 1980 and 2011
+
+#### Property Damage
+
+1. FLOOD ranks #1 by causing damage worth 144,657B$ between year 1980 and 2011
+
+2. HURRICANE/TYPHOON ranks #2 by causing damage worth 69,305 B$ between year 1980 and 2011
+
+
+## Global Settings
+```r{}
+echo = TRUE
+```
+## Data Processing
+
+### Read the source data file into a data frame
+
+We assume that there is a data directory in the current directory where this file exists.
+```{r cache=TRUE}
+if(!file.exists("data/repdata-data-StormData.csv.bz2"))
+  error("Data file does not exist in the current directory. Are we in the right directory")
+sev.Data <- read.csv("data/repdata-data-StormData.csv.bz2")
+```
+Our objective is to find the most harmful events across the United States. First we will see the data spread. We have `r nrow(sev.Data)` records in the full data set.
+```{r cache=TRUE}
+sev.Data$Year <- as.numeric(format(as.Date(sev.Data$BGN_DATE, format = "%m/%d/%Y %H:%M:%S"), "%Y"))
+```
+
+A histogram for this data shows low data volume between 1950 and 1980. We will use a simple logic and take data after 1980 for the purpose of our analysis. This will let us focus on the portion of the dataset that is rich in data and probably more accurately captured using information technology. 
+```{r cache=TRUE}
+sev.Data <- sev.Data[sev.Data$Year >= 1980 ,]
+```
+
+### Compact The Data Set
+
+We now have `r nrow(sev.Data)` records in the data set after using the above filter. We will further compact our data to have EVENT TYPE, FATALITIES, INJURIES, PROPDMG, CROPDMG. PROPDMGEXP & CROPDMGEXP columns only. This is because we are interested in a nation wide analysis.
+```{r}
+compact.Data <- sev.Data[,c(7,8, 23:28)]
+compact.Data$EVTYPE <- as.character(compact.Data$EVTYPE)
+```
+
+After compacting, the data looks as below:  
+```{r}
+head(compact.Data,3)
+```
+
+### Aggregate Fatalities And Injuries Data
+We can now aggregate the fatalities by the various event types.  
+```{r cache=TRUE}
+fatalities.Data <- aggregate(compact.Data$FATALITIES, by=list(EVTYPE=compact.Data$EVTYPE), FUN=sum)
+fatalities.Data <- fatalities.Data[order(fatalities.Data$x, decreasing=T),]
+colnames(fatalities.Data) <- c("WEATHER_EVENT", "NO_OF_FATALITIES")
+state.fatalities.Data <- aggregate(compact.Data$FATALITIES, by=list(EVTYPE=compact.Data$EVTYPE,STATE=compact.Data$STATE), FUN=sum)
+```
+
+This is how the top **aggregate fatalities** data looks like for the period 1980 to end November 2011, shown in decreasing order of fatalities.
+```{r}
+head(fatalities.Data, 10)
+```
+
+Similarly we can aggregate the injuries by the various event types.  
+```{r cache=TRUE}
+injuries.Data <- aggregate(compact.Data$INJURIES, by=list(EVTYPE=compact.Data$EVTYPE), FUN=sum)
+injuries.Data <- injuries.Data[order(injuries.Data$x, decreasing=T),]
+colnames(injuries.Data) <- c("WEATHER_EVENT", "NO_OF_INJURIES")
+state.injuries.Data <- aggregate(compact.Data$INJURIES, by=list(EVTYPE=compact.Data$EVTYPE,STATE=compact.Data$STATE), FUN=sum)
+```
+
+This is how the top **aggregate injuries** data looks like for the period 1980 to end November 2011, shown in decreasing order of injuries.
+```{r}
+head(injuries.Data, 10)
+```
+
+### Compute Economic Impact
+
+When processing the property and crop damage data, we need to convert the codified CROPDMG and PROPDMG values into actual dollar values. The PROPDMGEXP and CROPDMGEXP fields are multipliers. They have values between 0-9, and 'h' or 'H' for hundreds, 'k' or 'K for thousands, 'm' or 'M' for millions, and 'b' or 'B' for billions. In addition, we find values like "+", "?", and "-". In these cases we take the multiplier as unity. Where the values are between 0-9, the multiplier is 10 raised to the power of the number.  We perform this process by looping through each row in the compact data set as follows:
+
+```{r cache = TRUE}
+propDmgValue <- as.numeric(compact.Data$PROPDMG)
+cropDmgValue <- as.numeric(compact.Data$CROPDMG)
+propMult <- numeric()
+cropMult <- numeric()
+
+# The power function take an ascii code (K,M,B) and converts it to
+# a numeric <power> of 10 value
+
+power <- function(code) {
+  code <- toupper(code)
+  return(ifelse(code == "", 1L,
+          ifelse(code == "H",2L,
+           ifelse(code == "K", 3L,
+            ifelse(code == "M",6L,
+             ifelse(code == "B",9L,
+              ifelse(code == "+", 0L,
+               ifelse(code == "-",0L,
+                ifelse(code == "?", 0L, 
+                       as.numeric(code))))))))))
+}
+
+propMult <- 10 ^ power(compact.Data$PROPDMGEXP)
+cropMult <- 10 ^ power(compact.Data$CROPDMGEXP)
+
+# Very slow code below replaced by above two statements which
+# end up doing the same stuff. Although the above code outputs some
+# warnings, the results are the same
+#
+#for (i in 1:nrow(compact.Data)){
+#  if(is.na(compact.Data$PROPDMG[i]))
+#    propMult[i] <- 0
+#  else 
+#    propMult[i] <- 10^convertCode(compact.Data$PROPDMGEXP[i])
+#
+#  if(is.na(compact.Data$CROPDMG[i]))
+#    cropMult[i] <- 0
+#  else
+#    cropMult[i] <- 10^convertCode(compact.Data$CROPDMGEXP[i])
+# }
+
+propDmgValue <- propDmgValue * propMult
+cropDmgValue <- cropDmgValue * cropMult
+
+# Add the computed columns to the data frame
+
+compact.Data$CropDamageValue <- cropDmgValue
+compact.Data$PropDamageValue <- propDmgValue
+
+# Aggregate Crop Damage by Weather Event
+
+crop.Damage.Data <- aggregate(compact.Data$CropDamageValue, by=list(EVTYPE=compact.Data$EVTYPE), FUN=sum)
+crop.Damage.Data <- crop.Damage.Data[order(crop.Damage.Data$x, decreasing=T),]
+colnames(crop.Damage.Data) <- c("WEATHER_EVENT", "CROP_DAMAGE")
+
+state.crop.Data <- aggregate(compact.Data$CropDamageValue, by=list(EVTYPE=compact.Data$EVTYPE,STATE=compact.Data$STATE), FUN=sum)
+
+# Aggregate Property Damage by Weather Event
+
+prop.Damage.Data <- aggregate(compact.Data$PropDamageValue, by=list(EVTYPE=compact.Data$EVTYPE), FUN=sum)
+prop.Damage.Data <- prop.Damage.Data[order(prop.Damage.Data$x, decreasing=T),]
+colnames(prop.Damage.Data) <- c("WEATHER_EVENT", "PROP_DAMAGE")
+state.prop.Data <- aggregate(compact.Data$PropDamageValue, by=list(EVTYPE=compact.Data$EVTYPE,STATE=compact.Data$STATE), FUN=sum)
+```
+
+This is how the top **aggregate crop damage** data looks like for the period 1980 to end November 2011, shown in decreasing order of crop damage value.  
+```{r}
+head(crop.Damage.Data,10)
+```
+This is how the top **aggregate property damage** data looks like for the period 1980 to end November 2011, shown in decreasing order of property damage value.  
+```{r}
+head(prop.Damage.Data,10)
+```
+## Results
+
+Following code prepares data for plotting. Summary of results can be found below the code section.  
+
+```{r}
+library(ggplot2)
+require(gridExtra)
+options(scipen=99)
+fatalities.Data <- fatalities.Data[1:10,]
+injuries.Data <- injuries.Data[1:10,]
+fatalities.Data$X <- factor(fatalities.Data$WEATHER_EVENT,levels=as.character(fatalities.Data$WEATHER_EVENT))
+injuries.Data$X <- factor(injuries.Data$WEATHER_EVENT,levels=as.character(injuries.Data$WEATHER_EVENT))
+
+state.fatalities.Data <- state.fatalities.Data[state.fatalities.Data$EVTYPE == fatalities.Data$WEATHER_EVENT[1],]
+state.injuries.Data <- state.injuries.Data[state.injuries.Data$EVTYPE == injuries.Data$WEATHER_EVENT[1],]
+state.fatalities.Data <- state.fatalities.Data[order(state.fatalities.Data$x, decreasing=T),]
+state.injuries.Data <- state.injuries.Data[order(state.injuries.Data$x, decreasing=T),]
+
+state.fatalities.Data <- state.fatalities.Data[1:10,]
+state.fatalities.Data$XLABEL <- factor(state.fatalities.Data$STATE, levels=as.character(state.fatalities.Data$STATE))
+
+state.injuries.Data <- state.injuries.Data[1:10,]
+state.injuries.Data$XLABEL <- factor(state.injuries.Data$STATE, levels=as.character(state.injuries.Data$STATE))
+#
+crop.Damage.Data <- crop.Damage.Data[1:10,]
+prop.Damage.Data <- prop.Damage.Data[1:10,]
+crop.Damage.Data$X <- factor(crop.Damage.Data$WEATHER_EVENT,levels=as.character(crop.Damage.Data$WEATHER_EVENT))
+prop.Damage.Data$X <- factor(prop.Damage.Data$WEATHER_EVENT,levels=as.character(prop.Damage.Data$WEATHER_EVENT))
+
+state.crop.Data <- state.crop.Data[state.crop.Data$EVTYPE == crop.Damage.Data$WEATHER_EVENT[1],]
+state.prop.Data <- state.prop.Data[state.prop.Data$EVTYPE == prop.Damage.Data$WEATHER_EVENT[1],]
+state.crop.Data <- state.crop.Data[order(state.crop.Data$x, decreasing=T),]
+state.prop.Data <- state.prop.Data[order(state.prop.Data$x, decreasing=T),]
+
+state.crop.Data <- state.crop.Data[1:10,]
+state.crop.Data$XLABEL <- factor(state.crop.Data$STATE, levels=as.character(state.crop.Data$STATE))
+
+state.prop.Data <- state.prop.Data[1:10,]
+state.prop.Data$XLABEL <- factor(state.prop.Data$STATE, levels=as.character(state.prop.Data$STATE))
+```
+### Events Causing Most Population Health Impact Across US
+
+#### Fatalities
+
+1. **`r fatalities.Data$WEATHER_EVENT[1]` ranks #1** by causing **`r fatalities.Data$NO_OF_FATALITIES[1]` fatalities** between year 1980 and 2011
+
+2. **`r fatalities.Data$WEATHER_EVENT[2]` ranks #2** by causing **`r fatalities.Data$NO_OF_FATALITIES[2]` fatalities** between year 1980 and 2011
+
+#### Injuries
+
+1. **`r injuries.Data$WEATHER_EVENT[1]` ranks #1** by causing **`r injuries.Data$NO_OF_INJURIES[1]` injuries** between year 1980 and 2011
+
+2. **`r injuries.Data$WEATHER_EVENT[2]` ranks #2** by causing **`r injuries.Data$NO_OF_INJURIES[2]` injuries** between year 1980 and 2011
+
+#### Graphical Visualization Of Top 10 Events For Adverse Population Health Impact
+```{r}
+plot.f <- ggplot(fatalities.Data, aes(x=X, y=NO_OF_FATALITIES)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Number of Fatalities") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Weather Event") + 
+    ggtitle("Total Fatalities by Severe Weather\n Events in the U.S.\n  from 1980 - 2011")
+
+plot.sf <- ggplot(state.fatalities.Data, aes(x=XLABEL, y=x)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Number of Fatalities") + 
+    theme(axis.text.x = element_text(angle = 0, 
+    hjust = 1)) + xlab("State") + 
+    ggtitle("Top Tornado Fatality\nFigures by State")
+
+plot.i <- ggplot(injuries.Data, aes(x=X, y=NO_OF_INJURIES)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Number of Injuries") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Weather Event") + 
+    ggtitle("Total Injuries by Severe Weather\n Events in the U.S.\n from 1980 - 2011")
+
+plot.si <- ggplot(state.injuries.Data, aes(x=XLABEL, y=x)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Number of injuries") + 
+    theme(axis.text.x = element_text(angle = 0, 
+    hjust = 1)) + xlab("State") + 
+    ggtitle("Top Tornado Injury\nFigures by State")
+
+grid.arrange(plot.f, plot.i, plot.sf, plot.si, nrow = 2, ncol = 2, heights = c( 0.6, 0.4))
+```
+
+### Events Causing Most Economic Damage Across US
+
+#### Crop Damage
+
+1. **`r crop.Damage.Data$WEATHER_EVENT[1]` ranks #1** by causing damage worth **`r crop.Damage.Data$CROP_DAMAGE[1]` US Dollars** between year 1980 and 2011
+
+2. **`r crop.Damage.Data$WEATHER_EVENT[2]` ranks #2** by causing damage worth **`r crop.Damage.Data$CROP_DAMAGE[2]` US Dollars** between year 1980 and 2011
+
+#### Property Damage
+
+1. **`r prop.Damage.Data$WEATHER_EVENT[1]` ranks #1** by causing damage worth **`r prop.Damage.Data$PROP_DAMAGE[1]` US Dollars** between year 1980 and 2011
+
+2. **`r prop.Damage.Data$WEATHER_EVENT[2]` ranks #2** by causing damage worth **`r prop.Damage.Data$PROP_DAMAGE[2]` US Dollars** between year 1980 and 2011
+```{r}
+plot.c <- ggplot(crop.Damage.Data, aes(x=X, y=CROP_DAMAGE)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Damage in US$") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Weather Event") + 
+    ggtitle("Total Crop Damage by \nSevere Weather Events in\nthe U.S.  from 1980 - 2011")
+
+plot.sc <- ggplot(state.crop.Data, aes(x=XLABEL, y=x)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Damage in U$") + 
+    theme(axis.text.x = element_text(angle = 0, 
+    hjust = 1)) + xlab("State") + 
+    ggtitle("Top Drought Hit Crop\nDamage Figures by State")
+
+plot.p <- ggplot(prop.Damage.Data, aes(x=X, y=PROP_DAMAGE)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Damage in US$") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Weather Event") + 
+    ggtitle("Total Property Damage by \nSevere Weather Events in\nthe  U.S. from 1980 - 2011")
+
+plot.sp <- ggplot(state.prop.Data, aes(x=XLABEL, y=x)) + 
+    geom_bar(stat="identity") +
+    scale_y_continuous("Damage in US$") + 
+    theme(axis.text.x = element_text(angle = 0, 
+    hjust = 1)) + xlab("State") + 
+    ggtitle("Top Flood Hit Property\nDamage Figures by State")
+
+grid.arrange(plot.c, plot.p, plot.sc, plot.sp, nrow = 2, ncol = 2,  heights = c( 0.6, 0.4))
+```
+
+## Observations
+
+1. Weather events data in the data set needs further cleaning up. There are multiple entries for the same weather event type. This research used the Weather events data as is.
